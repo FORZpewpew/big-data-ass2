@@ -7,14 +7,15 @@ source .venv/bin/activate
 export PYSPARK_DRIVER_PYTHON=$(which python) 
 
 
-unset PYSPARK_PYTHON
 
 # DOWNLOAD a.parquet or any parquet file before you run this
 
-hdfs dfs -put -f a.parquet / && \
+hdfs dfs -put -f a.parquet /  && \
     spark-submit prepare_data.py && \
-    echo "Putting data to hdfs" && \
+    echo "[LOGS] Putting data to hdfs" && \
     hdfs dfs -put data / && \
-    hdfs dfs -ls /data && \
+    spark-submit prepare_index_data.py && \
+    sleep 3 && \
+    hdfs dfs -count /data | awk '{print "[LOGS] Number of files in /data:", $2}' && \
     hdfs dfs -ls /index/data && \
-    echo "done data preparation!"
+    echo "[LOGS] done data preparation!"

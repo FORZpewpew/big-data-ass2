@@ -15,12 +15,24 @@ pip install -r requirements.txt
 # Package the virtual env.
 venv-pack -o .venv.tar.gz
 
-# Collect data
-bash prepare_data.sh
+python3 cassandra_init.py
+if [ $? -ne 0 ]; then
+  echo "[LOGS] Failed to set up Cassandra. Exiting."
+  exit 1
+fi
 
+echo "[LOGS] STARTING TO PREPARE DATA"
+
+
+# Collect data
+bash prepare_data.sh | grep "[LOGS]"
 
 # Run the indexer
-bash index.sh data/sample.txt
+bash index.sh /index/data | grep "[LOGS]"
 
 # Run the ranker
-bash search.sh "this is a query!"
+# bash search.sh "this is a query!" | grep "[LOGS]"
+
+echo "[LOGS] Конец!"
+
+bash

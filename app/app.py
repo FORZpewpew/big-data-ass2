@@ -1,6 +1,5 @@
 from cassandra.cluster import Cluster
 
-
 print("hello app")
 
 # Connects to the cassandra server
