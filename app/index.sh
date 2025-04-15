@@ -3,13 +3,6 @@
 INPUT_PATH=${1:-/index/data}
 HDFS_TMP_PATH=/tmp/index
 
-if [[$INPUT_PATH == /index/data]]; then
-    echo "[LOGS]: Using HDFS: $INPUT_PATH"
-else
-    echo "[LOGS]: Copying from file to HDFS"
-    hdfs dfs -put -f $INPUT_PATH /tmp/local_data
-    INPUT_PATH="hdfs:///tmp/local_data"
-fi
 
 hadoop fs -rm -r $HDFS_TMP_PATH/step1
 hadoop fs -rm -r $HDFS_TMP_PATH/step2
