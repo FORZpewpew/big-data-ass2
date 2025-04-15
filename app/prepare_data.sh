@@ -15,7 +15,6 @@ hdfs dfs -put -f a.parquet /  && \
     echo "[LOGS] Putting data to hdfs" && \
     hdfs dfs -put data / && \
     spark-submit prepare_index_data.py && \
-    sleep 3 && \
     hdfs dfs -count /data | awk '{print "[LOGS] Number of files in /data:", $2}' && \
     hdfs dfs -ls /index/data && \
     echo "[LOGS] done data preparation!"
