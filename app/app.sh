@@ -18,13 +18,13 @@ venv-pack -o .venv.tar.gz
 echo "[LOGS] STARTING TO PREPARE DATA"
 
 # Collect data
-bash prepare_data.sh | grep "[LOGS]"
+bash prepare_data.sh
 
 # Run the indexer
-bash index.sh | grep "[LOGS]"
+bash index.sh
 
 # Run the ranker
-#bash search.sh "this is a query!" | grep "[LOGS]"
+bash search.sh "house" 1>&2 | grep "[LOGS]"
 
 echo "[LOGS] The end!"
 

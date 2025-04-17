@@ -1,10 +1,9 @@
-from pyspark import SparkContext, SparkConf
-import cassandra
-from cassandra.cluster import Cluster
-from cassandra.auth import PlainTextAuthProvider
 import sys
 import math
+from pyspark import SparkContext, SparkConf
+from cassandra.cluster import Cluster
 
+# BM25 constants
 k1 = 1.5
 b = 0.75
 
@@ -12,60 +11,84 @@ def fetch_cassandra_data():
     cluster = Cluster(['cassandra-server'])
     session = cluster.connect('search')
 
+    # Load vocabulary
     vocab_rows = session.execute("SELECT term, df FROM vocabulary")
-    index_rows = session.execute("SELECT term, doc_id, tf FROM inverted_index")
-    doc_rows = session.execute("SELECT doc_id, title, length FROM documents")
-
     vocab = {row.term: row.df for row in vocab_rows}
+
+    # Load inverted index
+    index_rows = session.execute("SELECT term, doc_id, tf FROM inverted_index")
     index = [(row.term, row.doc_id, row.tf) for row in index_rows]
-    docs = {row.doc_id: {'title': row.title, 'length': row.length} for row in doc_rows}
 
-    return vocab, index, docs
+    # Load document stats
+    doc_rows = session.execute("SELECT doc_id, length FROM documents")
+    doc_lengths = {}
+    total_length = 0
+    for row in doc_rows:
+        doc_lengths[row.doc_id] = row.length
+        total_length += row.length
 
-def compute_bm25(query_terms, vocab, index_rdd, docs, N, avg_doc_len):
-    query_terms_set = set(query_terms)
+    avg_dl = total_length / len(doc_lengths) if doc_lengths else 1
+    N = len(doc_lengths)
 
-    filtered_rdd = index_rdd.filter(lambda x: x[0] in query_terms_set)
+    return vocab, index, doc_lengths, avg_dl, N
 
-    def bm25_score(record):
-        term, doc_id, tf = record
-        df = vocab.get(term, 0)
-        idf = math.log(1 + (N - df + 0.5) / (df + 0.5))
+def compute_bm25(sc, query_terms, vocab, index, doc_lengths, avg_dl, N):
+    # Broadcast variables
+    bc_vocab = sc.broadcast(vocab)
+    bc_doc_lengths = sc.broadcast(doc_lengths)
 
-        doc_len = docs[doc_id]['length']
-        denom = tf + k1 * (1 - b + b * doc_len / avg_doc_len)
-        score = idf * tf * (k1 + 1) / denom
+    # Convert index to RDD
+    index_rdd = sc.parallelize(index)
+
+    # Filter index to only query terms
+    filtered = index_rdd.filter(lambda x: x[0] in query_terms)
+
+    # Compute BM25 for each (term, doc_id)
+    def score(row):
+        term, doc_id, tf = row
+        df = bc_vocab.value.get(term, 0)
+        idf = math.log((N - df + 0.5) / (df + 0.5) + 1)
+        dl = bc_doc_lengths.value.get(doc_id, 0)
+        numerator = tf * (k1 + 1)
+        denominator = tf + k1 * (1 - b + b * dl / avg_dl)
+        score = idf * (numerator / denominator)
         return (doc_id, score)
 
-    scored = filtered_rdd.map(bm25_score)
+    scored = filtered.map(score)
 
-    return scored.reduceByKey(lambda a, b: a + b)
+    # Sum BM25 scores per doc_id
+    doc_scores = scored.reduceByKey(lambda a, b: a + b)
+
+    # Get top 10
+    top10 = doc_scores.takeOrdered(10, key=lambda x: -x[1])
+
+    return top10
 
 def main():
     if len(sys.argv) < 2:
-        print("[LOGS] Query not provided.")
+        print("[LOGS] Please provide a query string.")
         sys.exit(1)
 
-    query = sys.argv[1]
-    query_terms = query.strip().lower().split()
+    query = sys.argv[1].strip().lower()
+    query_terms = query.split()
 
-    conf = SparkConf().setAppName("BM25Search")
+    conf = SparkConf().setAppName("BM25Query")
     sc = SparkContext(conf=conf)
 
-    vocab, index_data, docs = fetch_cassandra_data()
-    N = len(docs)
-    avg_doc_len = sum(d['length'] for d in docs.values()) / N if N > 0 else 1
+    print("[LOGS] Fetching index data from Cassandra...")
+    vocab, index, doc_lengths, avg_dl, N = fetch_cassandra_data()
 
-    index_rdd = sc.parallelize(index_data)
+    print(f"[LOGS] Total docs: {N}, Avg doc len: {avg_dl:.2f}")
+    top_docs = compute_bm25(sc, query_terms, vocab, index, doc_lengths, avg_dl, N)
 
-    scored_docs = compute_bm25(query_terms, vocab, index_rdd, docs, N, avg_doc_len)
-
-    top_10 = scored_docs.takeOrdered(10, key=lambda x: -x[1])
-
-    print("\n[LOGS] Top 10 Results for Query:", query)
-    for doc_id, score in top_10:
-        title = docs[doc_id].get("title", "N/A")
-        print(f"[LOGS] {doc_id}\t{title}\tScore: {score:.4f}")
+    print("[LOGS] Top 10 Documents:")
+    cluster = Cluster(['cassandra-server'])
+    session = cluster.connect('search')
+    for doc_id, score in top_docs:
+        title_result = session.execute("SELECT title FROM documents WHERE doc_id = %s", (doc_id,))
+        title = title_result.one()
+        title_text = title.title if title else "(No title)"
+        print(f"[LOGS]Document ID: {doc_id}\tTitle: {title_text}\tBM25 score: {score:.4f}")
 
     sc.stop()
 

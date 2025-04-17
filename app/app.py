@@ -2,7 +2,6 @@
 import subprocess
 from cassandra.cluster import Cluster
 from cassandra.query import BatchStatement
-from cassandra import ConsistencyLevel
 
 def fetch_hdfs_output(hdfs_path):
     cmd = ["hdfs", "dfs", "-cat", f"{hdfs_path}/part-*"]
@@ -21,7 +20,7 @@ def connect_cassandra():
     session.set_keyspace("search")
     return session
 
-def ensure_tables(session):
+def create_tables(session):
     session.execute("""
         CREATE TABLE IF NOT EXISTS vocabulary (
             term TEXT PRIMARY KEY,
@@ -44,6 +43,7 @@ def ensure_tables(session):
         )
     """)
 
+
 def parse_and_insert(lines, session):
     insert_vocab = session.prepare("INSERT INTO vocabulary (term, df) VALUES (?, ?)")
     insert_index = session.prepare("INSERT INTO inverted_index (term, doc_id, tf) VALUES (?, ?, ?)")
@@ -54,7 +54,7 @@ def parse_and_insert(lines, session):
     index_batch = BatchStatement()
     doc_batch = BatchStatement()
 
-    batch_limit = 250
+    batch_limit = 200
     vb_count = ib_count = db_count = 0
 
     for line in lines:
@@ -110,7 +110,7 @@ def main():
 
     session = connect_cassandra()
 
-    ensure_tables(session)
+    create_tables(session)
 
     parse_and_insert(lines, session)
 

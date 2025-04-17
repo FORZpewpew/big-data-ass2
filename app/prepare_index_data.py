@@ -35,7 +35,4 @@ transformed_rdd = transformed_rdd.coalesce(1)
 
 transformed_rdd.saveAsTextFile("hdfs:///index/data/")
 
-#transformed_rdd = transformed_rdd.repartition(2)
-#transformed_rdd.saveAsTextFile("hdfs:///index/data/")
-
 print("[LOGS] Transformed RDD saved to HDFS at /index/data")
